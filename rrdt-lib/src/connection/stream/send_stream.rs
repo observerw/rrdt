@@ -1,4 +1,4 @@
-use super::window::SendWindow;
+use super::window::{Chunk, SendWindow};
 use crate::{
     frame::stream::StreamDataFrame,
     serializable::Serializable,
@@ -55,7 +55,7 @@ impl Handler<Read> for SendStreamInner {
 
         match self.state {
             State::Ready | State::Send => {
-                if let Some(((data, offset), fin)) = self.window.read(data_len)? {
+                if let Some((Chunk(data, offset), fin)) = self.window.read(data_len)? {
                     if fin {
                         // 如果发送了fin frame则进入`DataSent`状态
                         self.state = State::DataSent;
@@ -74,7 +74,7 @@ impl Handler<Read> for SendStreamInner {
                 }
             }
             State::DataSent => {
-                if let Some(((data, offset), fin)) = self.window.read_retransmit(data_len)? {
+                if let Some((Chunk(data, offset), fin)) = self.window.read_retransmit(data_len)? {
                     Ok(Some(StreamDataFrame {
                         id: self.id,
                         offset,

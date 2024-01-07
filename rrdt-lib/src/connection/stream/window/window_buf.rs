@@ -1,7 +1,8 @@
-use crate::types::Chunk;
 use bytes::BytesMut;
 use std::ops::Range;
 use tokio::io;
+
+use super::Chunk;
 
 /// 带有偏移量的缓冲区
 pub struct WindowBuf {
@@ -38,10 +39,10 @@ impl WindowBuf {
         let end = start + len;
         let buf = &self.buf[start..end];
 
-        (buf.to_vec().into(), range.start)
+        Chunk(buf.to_vec().into(), range.start)
     }
 
-    pub fn write(&mut self, (data, offset): Chunk) -> io::Result<usize> {
+    pub fn write(&mut self, Chunk(data, offset): Chunk) -> io::Result<usize> {
         assert!(offset >= self.start);
 
         let start = (offset - self.start) as usize;

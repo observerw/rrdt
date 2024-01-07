@@ -1,8 +1,5 @@
-use super::{constant::MAX_WINDOW_SIZE, window_buf::WindowBuf};
-use crate::{
-    types::Chunk,
-    utils::{range_ext::RangeExt, range_set::RangeSet},
-};
+use super::{constant::MAX_WINDOW_SIZE, window_buf::WindowBuf, Chunk};
+use crate::utils::{range_ext::RangeExt, range_set::RangeSet};
 use bytes::Bytes;
 use tokio::io;
 
@@ -28,7 +25,7 @@ impl RecvWindow {
         }
     }
 
-    pub fn write(&mut self, (data, offset): Chunk, fin: bool) -> io::Result<usize> {
+    pub fn write(&mut self, Chunk(data, offset): Chunk, fin: bool) -> io::Result<usize> {
         if data.len() == 0 || offset < self.consumed() {
             return Ok(0);
         }
@@ -36,7 +33,7 @@ impl RecvWindow {
         let right_offset = offset + data.len() as u64;
         let range = offset..right_offset;
 
-        let n = self.buf.write((data, offset))?;
+        let n = self.buf.write(Chunk(data, offset))?;
 
         self.recv.insert(range);
 

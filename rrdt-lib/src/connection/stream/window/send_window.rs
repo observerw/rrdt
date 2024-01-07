@@ -1,8 +1,5 @@
-use super::{constant::MAX_WINDOW_SIZE, window_buf::WindowBuf};
-use crate::{
-    types::Chunk,
-    utils::{range_ext::RangeExt, range_set::RangeSet},
-};
+use super::{constant::MAX_WINDOW_SIZE, window_buf::WindowBuf, Chunk};
+use crate::utils::{range_ext::RangeExt, range_set::RangeSet};
 use bytes::Bytes;
 use std::{io, ops::Range};
 
@@ -44,7 +41,7 @@ impl SendWindow {
         }
     }
 
-    fn fin(&self, (data, offset): &Chunk) -> bool {
+    fn fin(&self, Chunk(data, offset): &Chunk) -> bool {
         self.wrote && offset + data.len() as u64 == self.wrote_offset
     }
 

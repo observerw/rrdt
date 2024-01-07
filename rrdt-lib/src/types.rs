@@ -17,4 +17,3 @@ pub type PacketNum = u64;
 pub type StreamId = u16;
 pub type ConnectionId = u64;
 pub type Offset = u64;
-pub type Chunk = (Bytes, Offset);

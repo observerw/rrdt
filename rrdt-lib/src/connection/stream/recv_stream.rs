@@ -1,4 +1,4 @@
-use super::window::RecvWindow;
+use super::window::{Chunk, RecvWindow};
 use crate::{
     connection::{packetizer, sender::Sender},
     frame::{stream::MaxStreamDataFrame, Frame},
@@ -127,7 +127,7 @@ impl Handler<Write> for RecvStreamInner {
             ));
         }
 
-        let result = self.window.write((data, offset), fin);
+        let result = self.window.write(Chunk(data, offset), fin);
 
         if result.is_ok() {
             match self.state {
