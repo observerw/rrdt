@@ -7,7 +7,6 @@ use self::{
 use crate::{
     congestion::{rtt_estimator::RttEstimator, NewReno},
     connection::{ack_sender::AckSender, inflight::Inflight, receiver::Receiver, sender::Sender},
-    frame::handshake::TransportParams,
     packet::{HandshakePacket, MAX_PACKET_SIZE},
     serializable::Serializable,
     types::ConnectionId,
@@ -22,6 +21,8 @@ use tokio::{
     net::{ToSocketAddrs, UdpSocket},
 };
 
+pub use transport::TransportParams;
+
 mod ack_sender;
 mod bcast;
 mod constant;
@@ -32,6 +33,7 @@ mod receiver;
 mod sender;
 mod stream;
 mod streams;
+mod transport;
 
 pub struct Connection {
     id: ConnectionId,
@@ -140,19 +142,33 @@ struct Addrs {
 
 pub struct ConnectionListener {
     socket: Arc<UdpSocket>,
+    params: TransportParams,
 }
 
 impl ConnectionListener {
     pub async fn bind(addr: impl ToSocketAddrs) -> io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind(addr).await?);
-        Ok(Self { socket })
+        let params = TransportParams::default();
+        Ok(Self { socket, params })
+    }
+
+    pub fn with_params(mut self, params: TransportParams) -> Self {
+        self.params = params;
+        self
     }
 
     pub async fn accept(&self) -> io::Result<Connection> {
         let mut buf = [0u8; MAX_PACKET_SIZE];
+
         let (n, addr) = self.socket.recv_from(&mut buf).await?;
-        self.socket.connect(addr).await?;
         let params = HandshakePacket::decode(&mut &buf[..n]).into_params();
+
+        self.socket.connect(addr).await?;
+
+        let packet = HandshakePacket::new(self.params.clone());
+        let len = packet.len();
+        packet.encode(&mut &mut buf[..]);
+        let _ = self.socket.send(&buf[..len]).await?;
 
         Connection::with_socket(self.socket.clone(), params).await
     }
@@ -170,33 +186,27 @@ impl ConnectionBuilder {
     ) -> io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind(local).await?);
         socket.connect(remote).await?;
+
         let params = TransportParams::default();
         Ok(Self { socket, params })
     }
 
-    pub fn with_streams(mut self, streams: u16) -> Self {
-        self.params.streams = streams;
-        self
-    }
-
-    pub fn with_max_ack_delay(mut self, max_ack_delay: Duration) -> Self {
-        self.params.max_ack_delay = max_ack_delay;
-        self
-    }
-
-    pub fn with_initial_max_stream_data(mut self, initial_max_stream_data: u64) -> Self {
-        self.params.initial_max_stream_data = initial_max_stream_data;
+    pub fn with_params(mut self, params: TransportParams) -> Self {
+        self.params = params;
         self
     }
 
     pub async fn build(self) -> io::Result<Connection> {
         let mut buf = [0u8; MAX_PACKET_SIZE];
+
         let packet = HandshakePacket::new(self.params);
         let len = packet.len();
-
         packet.encode(&mut &mut buf[..]);
         let _ = self.socket.send(&buf[..len]).await?;
 
-        Connection::with_socket(self.socket, TransportParams::default()).await
+        let n = self.socket.recv(&mut buf).await?;
+        let params = HandshakePacket::decode(&mut &buf[..n]).into_params();
+
+        Connection::with_socket(self.socket, params).await
     }
 }

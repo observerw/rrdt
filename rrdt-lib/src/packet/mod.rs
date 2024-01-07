@@ -5,7 +5,8 @@ pub use self::constant::*;
 pub use self::header::Header;
 use self::header::LongHeader;
 use crate::{
-    frame::{handshake::TransportParams, Frame, FrameMeta},
+    connection::TransportParams,
+    frame::{Frame, FrameMeta},
     serializable::Serializable,
     types::PacketNum,
 };

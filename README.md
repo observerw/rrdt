@@ -14,5 +14,3 @@ server端运行方式为：
 ```bash
 ./rrdt server
 ```
-
-请保证client端早于server端运行。

@@ -20,11 +20,12 @@ enum Role {
 
 pub async fn recv(
     local_addr: impl tokio::net::ToSocketAddrs,
+    remote_addr: impl tokio::net::ToSocketAddrs,
     path: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
     use crate::utils::merge;
     use anyhow::Ok;
-    use rrdt_lib::ConnectionListener;
+    use rrdt_lib::{ConnectionBuilder, TransportParams};
     use tokio::io::AsyncWriteExt;
     use tokio::task::JoinHandle;
     use tokio::{fs::File, io::BufReader};
@@ -33,8 +34,12 @@ pub async fn recv(
 
     let path = path.as_ref();
 
-    let listener = ConnectionListener::bind(local_addr).await?;
-    let mut conn = listener.accept().await?;
+    let params = TransportParams::default();
+    let mut conn = ConnectionBuilder::connect(local_addr, remote_addr)
+        .await?
+        .with_params(params)
+        .build()
+        .await?;
 
     let mut handles = vec![];
     while let Some(mut stream) = conn.accept().await {
@@ -88,11 +93,11 @@ pub async fn recv(
 
 pub async fn send(
     local_addr: impl tokio::net::ToSocketAddrs,
-    remote_addr: impl tokio::net::ToSocketAddrs,
+
     path: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
     use anyhow::Ok;
-    use rrdt_lib::ConnectionBuilder;
+    use rrdt_lib::{ConnectionListener, TransportParams};
     use tokio::{
         fs::File,
         io::{self, AsyncReadExt, BufReader},
@@ -116,11 +121,11 @@ pub async fn send(
     let stream_count =
         len / STREAM_CHUNK_SIZE as u64 + (len % STREAM_CHUNK_SIZE as u64 != 0) as u64;
 
-    let mut conn = ConnectionBuilder::connect(local_addr, remote_addr)
+    let params = TransportParams::default().with_streams(stream_count as u16);
+    let listener = ConnectionListener::bind(local_addr)
         .await?
-        .with_streams(stream_count as u16)
-        .build()
-        .await?;
+        .with_params(params);
+    let mut conn = listener.accept().await?;
 
     for _ in 0..stream_count {
         let mut stream = conn.open().await;
@@ -156,10 +161,10 @@ async fn main() -> anyhow::Result<()> {
 
     match role {
         Role::Client => {
-            recv(CLIENT_ADDR, FILE_PATH).await?;
+            recv(CLIENT_ADDR, SERVER_ADDR, FILE_PATH).await?;
         }
         Role::Server => {
-            send(SERVER_ADDR, CLIENT_ADDR, FILE_PATH).await?;
+            send(SERVER_ADDR, FILE_PATH).await?;
         }
     }
 

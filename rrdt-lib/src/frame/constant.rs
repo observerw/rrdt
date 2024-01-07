@@ -7,4 +7,3 @@ pub const ACK_TYPE: u8 = 0x04;
 pub const MAX_STREAM_DATA_TYPE: u8 = 0x05;
 
 pub const DEFAULT_ACK_RANGES_LIMIT: usize = 200;
-pub const DEFAULT_MAX_ACK_DELAY: Duration = Duration::from_millis(100);
