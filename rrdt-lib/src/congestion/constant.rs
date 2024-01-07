@@ -1,0 +1,3 @@
+pub const INITIAL_RTT: u64 = 333;
+pub const BASE_DATAGRAM_SIZE: u64 = 1200;
+pub const DEFAULT_LOSS_REDUCTION_FACTOR: f32 = 0.5;

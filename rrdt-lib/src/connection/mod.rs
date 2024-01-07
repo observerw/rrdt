@@ -1,0 +1,202 @@
+use self::{
+    bcast::{ListenAckedBcast, ListenLostBcast},
+    packetizer::Packetizer,
+    stream::{RecvStream, SendStream},
+    streams::Streams,
+};
+use crate::{
+    congestion::{rtt_estimator::RttEstimator, NewReno},
+    connection::{ack_sender::AckSender, inflight::Inflight, receiver::Receiver, sender::Sender},
+    frame::handshake::TransportParams,
+    packet::{HandshakePacket, MAX_PACKET_SIZE},
+    serializable::Serializable,
+    types::ConnectionId,
+};
+use actix::prelude::*;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tokio::{
+    io,
+    net::{ToSocketAddrs, UdpSocket},
+};
+
+mod ack_sender;
+mod bcast;
+mod constant;
+mod inflight;
+mod listener;
+mod packetizer;
+mod receiver;
+mod sender;
+mod stream;
+mod streams;
+
+pub struct Connection {
+    id: ConnectionId,
+    addrs: Addrs,
+    streams: Streams,
+}
+
+impl Connection {
+    pub(crate) async fn with_socket(
+        socket: Arc<UdpSocket>,
+        params: TransportParams,
+    ) -> io::Result<Self> {
+        let id = rand::random();
+        let estimator = Arc::new(RwLock::new(RttEstimator::new(params.max_ack_delay)));
+        let congestion = Arc::new(RwLock::new(NewReno::default()));
+        let ctx = ConnectionContext {
+            id,
+            socket,
+            estimator,
+            congestion,
+            params,
+        };
+
+        let inflight = Inflight::new(ctx.clone()).start();
+        let sender = Sender::new(
+            ctx.clone(),
+            sender::Addrs {
+                inflight: inflight.clone(),
+            },
+        )
+        .start();
+
+        let packetizer = Packetizer::new(
+            ctx.clone(),
+            packetizer::Addrs {
+                sender: sender.clone(),
+            },
+        )
+        .start();
+
+        let ack_sender = AckSender::new(
+            ctx.clone(),
+            ack_sender::Addrs {
+                packetizer: packetizer.clone(),
+            },
+        )
+        .start();
+
+        let streams = Streams::new(
+            ctx.clone(),
+            stream::Addrs {
+                packetizer: packetizer.clone(),
+            },
+        );
+
+        let receiver = Receiver::new(
+            ctx.clone(),
+            receiver::Addrs {
+                inflight: inflight.clone(),
+                ack_sender: ack_sender.clone(),
+                streams: streams.inner().clone(),
+            },
+        )
+        .start();
+
+        inflight.do_send(ListenAckedBcast(sender.clone().recipient()));
+        inflight.do_send(ListenAckedBcast(streams.inner().clone().recipient()));
+        inflight.do_send(ListenLostBcast(sender.clone().recipient()));
+        inflight.do_send(ListenLostBcast(streams.inner().clone().recipient()));
+
+        let addrs = Addrs { receiver };
+
+        Ok(Self { id, addrs, streams })
+    }
+
+    pub async fn open(&mut self) -> SendStream {
+        self.streams.open().await
+    }
+
+    pub async fn accept(&mut self) -> Option<RecvStream> {
+        self.streams.accept().await
+    }
+
+    pub async fn close(self) {
+        self.streams.close().await;
+        println!("{} dropped", self.id);
+    }
+
+    pub fn id(&self) -> ConnectionId {
+        self.id
+    }
+}
+
+#[derive(Clone)]
+pub struct ConnectionContext {
+    id: ConnectionId,
+    socket: Arc<UdpSocket>,
+    estimator: Arc<RwLock<RttEstimator>>,
+    congestion: Arc<RwLock<NewReno>>,
+    params: TransportParams,
+}
+
+struct Addrs {
+    receiver: Addr<Receiver>,
+}
+
+pub struct ConnectionListener {
+    socket: Arc<UdpSocket>,
+}
+
+impl ConnectionListener {
+    pub async fn bind(addr: impl ToSocketAddrs) -> io::Result<Self> {
+        let socket = Arc::new(UdpSocket::bind(addr).await?);
+        Ok(Self { socket })
+    }
+
+    pub async fn accept(&self) -> io::Result<Connection> {
+        let mut buf = [0u8; MAX_PACKET_SIZE];
+        let (n, addr) = self.socket.recv_from(&mut buf).await?;
+        self.socket.connect(addr).await?;
+        let params = HandshakePacket::decode(&mut &buf[..n]).into_params();
+
+        Connection::with_socket(self.socket.clone(), params).await
+    }
+}
+
+pub struct ConnectionBuilder {
+    socket: Arc<UdpSocket>,
+    params: TransportParams,
+}
+
+impl ConnectionBuilder {
+    pub async fn connect(
+        local: impl ToSocketAddrs,
+        remote: impl ToSocketAddrs,
+    ) -> io::Result<Self> {
+        let socket = Arc::new(UdpSocket::bind(local).await?);
+        socket.connect(remote).await?;
+        let params = TransportParams::default();
+        Ok(Self { socket, params })
+    }
+
+    pub fn with_streams(mut self, streams: u16) -> Self {
+        self.params.streams = streams;
+        self
+    }
+
+    pub fn with_max_ack_delay(mut self, max_ack_delay: Duration) -> Self {
+        self.params.max_ack_delay = max_ack_delay;
+        self
+    }
+
+    pub fn with_initial_max_stream_data(mut self, initial_max_stream_data: u64) -> Self {
+        self.params.initial_max_stream_data = initial_max_stream_data;
+        self
+    }
+
+    pub async fn build(self) -> io::Result<Connection> {
+        let mut buf = [0u8; MAX_PACKET_SIZE];
+        let packet = HandshakePacket::new(self.params);
+        let len = packet.len();
+
+        packet.encode(&mut &mut buf[..]);
+        let _ = self.socket.send(&buf[..len]).await?;
+
+        Connection::with_socket(self.socket, TransportParams::default()).await
+    }
+}
