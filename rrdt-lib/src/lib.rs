@@ -11,6 +11,6 @@ mod types;
 mod utils;
 
 pub use connection::{
-    CompressConnectionBuilder, CompressConnectionListener, CompressedParams, Connection,
-    ConnectionBuildResult, ConnectionBuilder, ConnectionListener, TransportParams,
+    CompressedParams, Connection, ConnectionBuildResult, ConnectionBuilder, ConnectionListener,
+    TransportParams,
 };
