@@ -5,7 +5,7 @@ use std::{
 };
 use tokio::{
     fs::{self, File},
-    io::{self, BufReader, BufWriter},
+    io::{self, AsyncReadExt, AsyncSeekExt, BufReader, BufWriter},
 };
 
 async fn merge_neighbour(path: &Path, count: usize) -> io::Result<()> {
@@ -88,5 +88,23 @@ impl PathExt for Path {
         let (file_path, mut file_name) = self.split_file_name()?;
         file_name.push(format!(".{}", variant.to_string()));
         Ok(file_path.join(file_name))
+    }
+}
+
+/// 检测前64个字节是否相同，如果相同则几乎可以肯定该文件是 `same_char`的，返回该字符
+pub async fn try_compress(reader: &mut tokio::io::BufReader<File>) -> io::Result<Option<u8>> {
+    let mut buf = [0u8; 64];
+    let n = reader.read(&mut buf).await?;
+    reader.rewind().await?;
+
+    if n == 0 {
+        return Ok(None);
+    }
+
+    let is_same = buf.iter().fold(0, |a, b| a ^ b) == 0;
+    if is_same {
+        Ok(Some(buf[0]))
+    } else {
+        Ok(None)
     }
 }

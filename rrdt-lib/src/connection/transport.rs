@@ -1,3 +1,5 @@
+use bytes::{Buf, BufMut};
+
 use crate::serializable::Serializable;
 use std::time::Duration;
 
@@ -56,7 +58,7 @@ impl Default for TransportParams {
 }
 
 impl Serializable for TransportParams {
-    fn decode(data: &mut impl bytes::Buf) -> Self {
+    fn decode(data: &mut impl Buf) -> Self {
         let max_ack_delay = data.get_u64();
         let initial_max_stream_data = data.get_u64();
         let streams = data.get_u16();
@@ -68,7 +70,7 @@ impl Serializable for TransportParams {
         }
     }
 
-    fn encode(self, data: &mut impl bytes::BufMut) {
+    fn encode(self, data: &mut impl BufMut) {
         data.put_u64(self.max_ack_delay.as_millis() as u64);
         data.put_u64(self.initial_max_stream_data);
         data.put_u16(self.streams);
@@ -81,5 +83,39 @@ impl Serializable for TransportParams {
             std::mem::size_of::<u64>() +
             // initial_max_streams
             std::mem::size_of::<u16>()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompressedParams {
+    pub byte: u8,
+    pub size: u64,
+}
+
+impl CompressedParams {
+    pub fn new(data: u8, size: u64) -> Self {
+        Self { byte: data, size }
+    }
+}
+
+impl Serializable for CompressedParams {
+    fn decode(data: &mut impl Buf) -> Self {
+        let byte = data.get_u8();
+        let size = data.get_u64();
+        Self { byte, size }
+    }
+
+    fn encode(self, data: &mut impl BufMut) {
+        data.put_u8(self.byte as u8);
+        data.put_u64(self.size);
+    }
+
+    fn min_len() -> usize {
+        // type
+        std::mem::size_of::<u8>() +
+            // byte
+            std::mem::size_of::<u8>() +
+            // size
+            std::mem::size_of::<u64>()
     }
 }

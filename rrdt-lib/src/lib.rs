@@ -10,4 +10,7 @@ mod serializable;
 mod types;
 mod utils;
 
-pub use connection::{ConnectionBuilder, ConnectionListener, TransportParams};
+pub use connection::{
+    CompressConnectionBuilder, CompressConnectionListener, CompressedParams, Connection,
+    ConnectionBuildResult, ConnectionBuilder, ConnectionListener, TransportParams,
+};

@@ -7,21 +7,18 @@ use self::{
 use crate::{
     congestion::{rtt_estimator::RttEstimator, NewReno},
     connection::{ack_sender::AckSender, inflight::Inflight, receiver::Receiver, sender::Sender},
-    packet::{HandshakePacket, MAX_PACKET_SIZE},
+    packet::{CompressedPacket, HandshakePacket, LongPacket, MAX_PACKET_SIZE},
     serializable::Serializable,
     types::ConnectionId,
 };
 use actix::prelude::*;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::sync::{Arc, RwLock};
 use tokio::{
     io,
     net::{ToSocketAddrs, UdpSocket},
 };
 
-pub use transport::TransportParams;
+pub use transport::{CompressedParams, TransportParams};
 
 mod ack_sender;
 mod bcast;
@@ -174,6 +171,73 @@ impl ConnectionListener {
     }
 }
 
+pub struct CompressConnectionListener {
+    socket: Arc<UdpSocket>,
+    params: Option<ConnectionListenerParams>,
+}
+
+impl CompressConnectionListener {
+    pub async fn bind(addr: impl ToSocketAddrs) -> io::Result<Self> {
+        let socket = Arc::new(UdpSocket::bind(addr).await?);
+        Ok(Self {
+            socket,
+            params: None,
+        })
+    }
+
+    pub fn with_transport_params(mut self, params: TransportParams) -> Self {
+        self.params = Some(ConnectionListenerParams::Transport(params));
+        self
+    }
+
+    pub fn with_compressed_params(mut self, params: CompressedParams) -> Self {
+        self.params = Some(ConnectionListenerParams::Compress(params));
+        self
+    }
+
+    pub async fn accept(&self) -> io::Result<Option<Connection>> {
+        let mut buf = [0u8; MAX_PACKET_SIZE];
+
+        let (n, addr) = self.socket.recv_from(&mut buf).await?;
+        let client_params = match LongPacket::decode(&mut &buf[..n]) {
+            LongPacket::Handshake(packet) => packet.into_params(),
+            _ => panic!("unexpected packet"),
+        };
+
+        self.socket.connect(addr).await?;
+
+        match &self.params {
+            Some(ConnectionListenerParams::Transport(params)) => {
+                let packet = LongPacket::Handshake(HandshakePacket::new(params.clone()));
+                let len = packet.len();
+                packet.encode(&mut &mut buf[..]);
+                let _ = self.socket.send(&buf[..len]).await?;
+
+                let conn = Connection::with_socket(self.socket.clone(), client_params).await?;
+                Ok(Some(conn))
+            }
+            Some(ConnectionListenerParams::Compress(params)) => {
+                let packet = LongPacket::Compressed(CompressedPacket::new(params.clone()));
+                let len = packet.len();
+                packet.encode(&mut &mut buf[..]);
+                let _ = self.socket.send(&buf[..len]).await?;
+
+                Ok(None)
+            }
+            None => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no params specified",
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ConnectionListenerParams {
+    Transport(TransportParams),
+    Compress(CompressedParams),
+}
+
 pub struct ConnectionBuilder {
     socket: Arc<UdpSocket>,
     params: TransportParams,
@@ -209,4 +273,58 @@ impl ConnectionBuilder {
 
         Connection::with_socket(self.socket, params).await
     }
+}
+
+pub struct CompressConnectionBuilder {
+    socket: Arc<UdpSocket>,
+    params: TransportParams,
+}
+
+impl CompressConnectionBuilder {
+    pub async fn connect(
+        local: impl ToSocketAddrs,
+        remote: impl ToSocketAddrs,
+    ) -> io::Result<Self> {
+        let socket = Arc::new(UdpSocket::bind(local).await?);
+        socket.connect(remote).await?;
+
+        let params = TransportParams::default();
+        Ok(Self { socket, params })
+    }
+
+    pub fn with_params(mut self, params: TransportParams) -> Self {
+        self.params = params;
+        self
+    }
+
+    pub async fn build(self) -> io::Result<ConnectionBuildResult> {
+        let mut buf = [0u8; MAX_PACKET_SIZE];
+
+        let packet = LongPacket::Handshake(HandshakePacket::new(self.params));
+        let len = packet.len();
+        packet.encode(&mut &mut buf[..]);
+        let _ = self.socket.send(&buf[..len]).await?;
+
+        let n = self.socket.recv(&mut buf).await?;
+        let packet = LongPacket::decode(&mut &buf[..n]);
+
+        match packet {
+            LongPacket::Handshake(packet) => {
+                let params = packet.into_params();
+                let conn = Connection::with_socket(self.socket.clone(), params).await?;
+
+                Ok(ConnectionBuildResult::Connection(conn))
+            }
+            LongPacket::Compressed(packet) => {
+                let params = packet.into_params();
+                Ok(ConnectionBuildResult::Compressed(params))
+            }
+            _ => panic!("unexpected packet"),
+        }
+    }
+}
+
+pub enum ConnectionBuildResult {
+    Connection(Connection),
+    Compressed(CompressedParams),
 }
