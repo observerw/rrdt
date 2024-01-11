@@ -20,7 +20,7 @@ async fn merge_neighbour(path: &Path, count: usize) -> io::Result<()> {
     }
 
     if source_path.exists() {
-        let target = File::options().write(true).open(target_path).await?;
+        let target = File::options().append(true).open(target_path).await?;
         let mut writer = BufWriter::new(target);
 
         let source = File::open(source_path).await?;

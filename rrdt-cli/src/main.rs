@@ -93,7 +93,6 @@ pub async fn recv(
 
 pub async fn send(
     local_addr: impl tokio::net::ToSocketAddrs,
-
     path: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
     use anyhow::Ok;
@@ -175,25 +174,27 @@ async fn main() -> anyhow::Result<()> {
 // async fn main() -> anyhow::Result<()> {
 //     use tokio::task::JoinHandle;
 //     use tokio::time::Instant;
-//     use Path;
 
 //     const CLIENT_ADDR: &str = "127.0.0.1:2333";
 //     const SERVER_ADDR: &str = "127.0.0.1:2334";
+//     const RECV_PATH: &str = "data/target.bin";
+//     const SEND_PATH: &str = "data/source.bin";
 
 //     let start = Instant::now();
 
-//     let client: JoinHandle<anyhow::Result<()>> = actix_rt::spawn(async move {
-//         recv(CLIENT_ADDR, Path::new("data/target.bin")).await?;
-//         Ok(())
-//     });
-
 //     let server: JoinHandle<anyhow::Result<()>> = actix_rt::spawn(async move {
-//         send(SERVER_ADDR, CLIENT_ADDR, Path::new("data/source.bin")).await?;
+//         send(SERVER_ADDR, SEND_PATH).await?;
 //         Ok(())
 //     });
 
-//     let _ = client.await??;
+//     let client: JoinHandle<anyhow::Result<()>> = actix_rt::spawn(async move {
+//         actix_rt::time::sleep(std::time::Duration::from_millis(1)).await;
+//         recv(CLIENT_ADDR, SERVER_ADDR, RECV_PATH).await?;
+//         Ok(())
+//     });
+
 //     let _ = server.await??;
+//     let _ = client.await??;
 
 //     let elapsed = start.elapsed();
 //     println!("time = {:?}", elapsed);
